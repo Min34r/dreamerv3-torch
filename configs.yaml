@@ -29,6 +29,11 @@ defaults:
   prefill: 2500
   reward_EMA: True
 
+  # Highway-env defaults (used when suite is 'highway')
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+  highway_vehicles_count: 5
+
   # Model
   dyn_hidden: 512
   dyn_deter: 512
@@ -182,3 +187,154 @@ debug:
   prefill: 1
   batch_size: 10
   batch_length: 20
+
+# Highway-Env autonomous driving configurations
+highway:
+  task: highway_highway
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  time_limit: 200
+  eval_every: 5e3
+  log_every: 1e3
+  video_pred_log: true
+  size: [64, 64]
+  grayscale: False
+  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 32, mlp_layers: 5, mlp_units: 1024}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 32, mlp_layers: 5, mlp_units: 1024}
+  actor: {layers: 2, dist: 'onehot', std: 'none'}
+  imag_gradient: 'reinforce'
+  # Highway-env specific settings
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+
+highway_kinematics:
+  task: highway_highway
+  steps: 5e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 512
+  time_limit: 200
+  video_pred_log: false
+  encoder: {mlp_keys: 'vector', cnn_keys: '$^', mlp_layers: 5, mlp_units: 1024}
+  decoder: {mlp_keys: 'vector', cnn_keys: '$^', mlp_layers: 5, mlp_units: 1024}
+  actor: {layers: 2, dist: 'onehot', std: 'none'}
+  imag_gradient: 'reinforce'
+  # Highway-env specific settings
+  highway_obs_type: 'kinematics'
+  highway_action_type: 'discrete'
+  highway_vehicles_count: 5
+
+highway_continuous:
+  task: highway_highway
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 200
+  video_pred_log: true
+  size: [64, 64]
+  grayscale: False
+  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 32, mlp_layers: 5, mlp_units: 1024}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 32, mlp_layers: 5, mlp_units: 1024}
+  actor: {layers: 2, dist: 'normal', entropy: 3e-4}
+  imag_gradient: 'dynamics'
+  # Highway-env specific settings
+  highway_obs_type: 'image'
+  highway_action_type: 'continuous'
+
+intersection:
+  task: highway_intersection
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 200
+  video_pred_log: true
+  size: [64, 64]
+  grayscale: False
+  encoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  actor: {layers: 2, dist: 'onehot', std: 'none'}
+  imag_gradient: 'reinforce'
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+
+parking:
+  task: highway_parking
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 300
+  video_pred_log: true
+  size: [64, 64]
+  grayscale: False
+  encoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  actor: {layers: 2, dist: 'normal', entropy: 3e-4}
+  imag_gradient: 'dynamics'
+  highway_obs_type: 'image'
+  highway_action_type: 'continuous'
+
+merge:
+  task: highway_merge
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 200
+  video_pred_log: true
+  size: [64, 64]
+  encoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  actor: {layers: 2, dist: 'onehot', std: 'none'}
+  imag_gradient: 'reinforce'
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+
+roundabout:
+  task: highway_roundabout
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 200
+  video_pred_log: true
+  size: [64, 64]
+  encoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  actor: {layers: 2, dist: 'onehot', std: 'none'}
+  imag_gradient: 'reinforce'
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+
+racetrack:
+  task: highway_racetrack
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 500
+  video_pred_log: true
+  size: [64, 64]
+  grayscale: False
+  encoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image'}
+  actor: {layers: 2, dist: 'normal', entropy: 3e-4}
+  imag_gradient: 'dynamics'
+  highway_obs_type: 'image'
+  highway_action_type: 'continuous'

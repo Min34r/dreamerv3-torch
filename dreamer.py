@@ -73,7 +73,8 @@ class Dreamer(nn.Module):
                     self._metrics[name] = []
                 if self._config.video_pred_log:
                     openl = self._wm.video_pred(next(self._dataset))
-                    self._logger.video("train_openl", to_np(openl))
+                    if openl is not None:
+                        self._logger.video("train_openl", to_np(openl))
                 self._logger.write(fps=True)
 
         policy_output, state = self._policy(obs, state, training)
@@ -193,6 +194,35 @@ def make_env(config, mode, id):
 
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
+    elif suite == "highway":
+        import envs.highway as highway
+
+        obs_type = getattr(config, 'highway_obs_type', 'image')
+        action_type = getattr(config, 'highway_action_type', 'discrete')
+        
+        if obs_type == "kinematics":
+            vehicles_count = getattr(config, 'highway_vehicles_count', 5)
+            env = highway.HighwayEnvKinematics(
+                task,
+                action_repeat=config.action_repeat,
+                vehicles_count=vehicles_count,
+                action_type=action_type,
+                seed=config.seed + id,
+            )
+        else:
+            env = highway.HighwayEnv(
+                task,
+                action_repeat=config.action_repeat,
+                size=config.size,
+                obs_type=obs_type,
+                action_type=action_type,
+                seed=config.seed + id,
+            )
+        
+        if action_type == "discrete":
+            env = wrappers.OneHotAction(env)
+        else:
+            env = wrappers.NormalizeActions(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)
@@ -293,7 +323,7 @@ def main(config):
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
     if (logdir / "latest.pt").exists():
-        checkpoint = torch.load(logdir / "latest.pt")
+        checkpoint = torch.load(logdir / "latest.pt", weights_only=False)
         agent.load_state_dict(checkpoint["agent_state_dict"])
         tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False
@@ -315,7 +345,8 @@ def main(config):
             )
             if config.video_pred_log:
                 video_pred = agent._wm.video_pred(next(eval_dataset))
-                logger.video("eval_openl", to_np(video_pred))
+                if video_pred is not None:
+                    logger.video("eval_openl", to_np(video_pred))
         print("Start training.")
         state = tools.simulate(
             agent,

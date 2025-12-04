@@ -110,7 +110,10 @@ class ProcessPipeWorker:
             self._process.join(0.1)
             if self._process.exitcode is None:
                 try:
-                    os.kill(self._process.pid, 9)
+                    self._process.terminate()  # Cross-platform process termination
+                    self._process.join(0.5)
+                    if self._process.exitcode is None:
+                        self._process.kill()  # Force kill if terminate didn't work
                     time.sleep(0.1)
                 except Exception:
                     pass
