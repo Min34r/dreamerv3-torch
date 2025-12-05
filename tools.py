@@ -154,6 +154,9 @@ def simulate(
             results = [envs[i].reset() for i in indices]
             results = [r() for r in results]
             for index, result in zip(indices, results):
+                # Handle gymnasium's (obs, info) return format
+                if isinstance(result, tuple):
+                    result = result[0]
                 t = result.copy()
                 t = {k: convert(v) for k, v in t.items()}
                 # action will be added to transition in add_to_cache
@@ -177,17 +180,19 @@ def simulate(
         # step envs
         results = [e.step(a) for e, a in zip(envs, action)]
         results = [r() for r in results]
-        obs, reward, done = zip(*[p[:3] for p in results])
+        # Handle gymnasium's 5-tuple format (obs, reward, terminated, truncated, info)
+        obs, reward, terminated, truncated = zip(*[p[:4] for p in results])
+        done = np.array([t or tr for t, tr in zip(terminated, truncated)])
         obs = list(obs)
         reward = list(reward)
-        done = np.stack(done)
         episode += int(done.sum())
         length += 1
         step += len(envs)
         length *= 1 - done
         # add to cache
         for a, result, env in zip(action, results, envs):
-            o, r, d, info = result
+            o, r, term, trunc, info = result
+            d = term or trunc
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
             if isinstance(a, dict):

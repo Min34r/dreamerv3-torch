@@ -17,14 +17,39 @@ Highway-env is a collection of environments for autonomous driving and tactical 
 
 ### Supported Environments
 
-| Environment | Description | Action Type |
-|-------------|-------------|-------------|
-| `highway` | Highway driving with lane changes | Discrete |
-| `intersection` | Navigate through an intersection | Discrete |
-| `parking` | Park in a designated spot | Continuous |
-| `merge` | Merge onto a highway | Discrete |
-| `roundabout` | Navigate a roundabout | Discrete |
-| `racetrack` | Race on a curved track | Continuous |
+| Environment | Description | Action Type | Vehicle Config |
+|-------------|-------------|-------------|----------------|
+| `highway` | Highway driving with lane changes | Discrete | `vehicles_count`, `vehicles_density` |
+| `intersection` | Navigate through an intersection | Discrete | `initial_vehicle_count` (max 20) |
+| `parking` | Park in a designated spot | Continuous | No other vehicles |
+| `merge` | Merge onto a highway | Discrete | Fixed (vehicles from ramp) |
+| `roundabout` | Navigate a roundabout | Discrete | Dynamic spawning |
+| `racetrack` | Race on a curved track | Continuous | `other_vehicles` (max 10) |
+
+### Action Types
+
+#### Discrete Actions (`DiscreteMetaAction`)
+High-level, predefined actions. The agent chooses from **5 discrete options**:
+
+| Action | ID | Description |
+|--------|-----|-------------|
+| `LANE_LEFT` | 0 | Change to left lane |
+| `IDLE` | 1 | Stay in current lane, maintain speed |
+| `LANE_RIGHT` | 2 | Change to right lane |
+| `FASTER` | 3 | Accelerate |
+| `SLOWER` | 4 | Decelerate |
+
+**Best for:** Highway, intersection, merge, roundabout (lane-based decisions)
+
+#### Continuous Actions (`ContinuousAction`)
+Low-level, direct control. The agent outputs **2 continuous values**:
+
+| Parameter | Range | Description |
+|-----------|-------|-------------|
+| `acceleration` | [-1, 1] | Throttle/brake (-1 = full brake, +1 = full throttle) |
+| `steering` | [-1, 1] | Steering angle (-1 = full left, +1 = full right) |
+
+**Best for:** Parking, racetrack (precise maneuvering needed)
 
 ## Installation
 
@@ -146,6 +171,106 @@ With default settings (RTX 4060 or similar):
 | `highway_kinematics` | Kinematics vectors | Discrete | Faster training, no images |
 | `highway_continuous` | Image (64x64 RGB) | Continuous | Fine-grained control |
 
+### Vehicle Density Configuration
+
+Control the number of vehicles in environments:
+
+```powershell
+# Highway with 50 vehicles (default)
+python dreamer.py --configs highway --highway_vehicles_count 50 --device cuda:0
+
+# Fewer vehicles for easier learning
+python dreamer.py --configs highway --highway_vehicles_count 10 --device cuda:0
+
+# More dense traffic
+python dreamer.py --configs highway --highway_vehicles_count 80 --highway_vehicles_density 2.0 --device cuda:0
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `highway_vehicles_count` | 50 | Number of vehicles |
+| `highway_vehicles_density` | 1.5 | Density of vehicles on road |
+
+**Note:** Different environments use these parameters differently:
+- **Highway**: Direct `vehicles_count` and `vehicles_density`
+- **Intersection**: Converted to `initial_vehicle_count` (capped at 20)
+- **Racetrack**: Converted to `other_vehicles` (capped at 10)
+- **Merge/Roundabout**: Fixed vehicle spawning (not configurable)
+- **Parking**: No other vehicles
+
+### Reward Shaping
+
+The highway environments include comprehensive reward shaping for improved learning. This can be customized in `configs.yaml`:
+
+```yaml
+highway:
+  # ... other configs ...
+  highway_reward_shaping: True  # Enable/disable reward shaping
+  highway_reward_config:
+    # Speed rewards
+    high_speed_reward: 0.4        # Reward for maintaining high speed
+    reward_speed_range: [25, 30]  # Optimal speed range [min, max] m/s
+    
+    # Safety penalties
+    collision_reward: -1.0        # Strong penalty for collision
+    safe_distance_reward: 0.1     # Reward for keeping safe distance
+    min_safe_distance: 15.0       # Minimum safe distance (meters)
+    safe_distance_penalty: 0.3    # Penalty for being too close
+    
+    # Lane behavior - Smart lane changing
+    right_lane_reward: 0.05       # Small reward for rightmost lane
+    lane_change_reward: 0.0       # No penalty for lane changes
+    smart_lane_change_reward: 0.3 # Reward for overtaking slow vehicles
+    blocked_lane_penalty: 0.2     # Penalty for staying behind slow vehicle
+    clear_lane_reward: 0.15       # Reward for being in a clear lane
+    look_ahead_distance: 50.0     # Distance to look ahead for obstacles
+    slow_vehicle_threshold: 0.7   # Vehicle is "slow" if < 70% of ego speed
+    
+    # Road adherence
+    on_road_reward: 0.1           # Reward for staying on road
+    off_road_penalty: -0.5        # Penalty for going off-road
+    
+    # Progress and alignment
+    heading_reward: 0.1           # Reward for proper road alignment
+    progress_reward_scale: 0.01   # Scale for forward progress reward
+    
+    # Survival
+    survival_reward: 0.01         # Small constant reward for staying alive
+    success_reward: 0.5           # Bonus for completing episode without crash
+    
+    # Blending factor (0-1)
+    shaped_reward_weight: 0.8     # 0.8 = 80% shaped, 20% original reward
+```
+
+#### Reward Components Explained
+
+1. **Speed Reward**: Encourages maintaining optimal driving speed within the specified range
+2. **Collision Penalty**: Strong negative reward when crashing
+3. **Safe Distance Reward**: Rewards maintaining safe following distance from other vehicles
+4. **Smart Lane Change Reward**: Rewards changing lanes to overtake slower vehicles
+5. **Blocked Lane Penalty**: Penalizes staying behind a slow vehicle when overtaking is possible
+6. **Clear Lane Reward**: Rewards being in a lane with no obstacles ahead
+7. **Right Lane Reward**: Small encouragement to stay in rightmost lane (reduced to allow overtaking)
+8. **On-Road Reward**: Rewards staying on the road surface
+9. **Heading Reward**: Rewards proper alignment with road direction
+10. **Progress Reward**: Rewards forward movement
+11. **Survival Reward**: Small constant reward for each step survived
+12. **Success Reward**: Bonus for completing episode without crashing
+
+#### Disabling Reward Shaping
+
+To use the original highway-env rewards:
+
+```yaml
+highway:
+  highway_reward_shaping: False
+```
+
+Or via command line:
+```powershell
+python dreamer.py --configs highway --highway_reward_shaping False --logdir ./logdir/highway_original
+```
+
 ### Custom Configuration
 
 You can override config values via command line:
@@ -171,6 +296,10 @@ python dreamer.py --configs highway --eval_every 1e4 --logdir ./logdir/highway
 | `log_every` | 1e3 | Logging frequency |
 | `time_limit` | 200 | Max steps per episode |
 | `size` | [64, 64] | Image observation size |
+| `highway_vehicles_count` | 50 | Number of vehicles in environment |
+| `highway_vehicles_density` | 1.5 | Vehicle density on road |
+| `highway_reward_shaping` | True | Enable reward shaping |
+| `highway_action_type` | discrete | Action type (discrete/continuous) |
 
 ## Monitoring Training
 

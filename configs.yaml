@@ -208,6 +208,34 @@ highway:
   # Highway-env specific settings
   highway_obs_type: 'image'
   highway_action_type: 'discrete'
+  # Vehicle density settings
+  highway_vehicles_count: 50      # Number of vehicles (default was ~5, now 50)
+  highway_vehicles_density: 1.5   # Density of vehicles on road
+  # Reward shaping configuration
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.4
+    reward_speed_range: [25, 30]
+    collision_reward: -1.0
+    # Lane change rewards - improved for better overtaking behavior
+    right_lane_reward: 0.05       # Small reward for rightmost lane (reduced)
+    lane_change_reward: 0.0       # No penalty for lane changes
+    smart_lane_change_reward: 0.3 # Reward for changing lane to avoid slow vehicle
+    blocked_lane_penalty: 0.2     # Penalty for staying behind slow vehicle
+    clear_lane_reward: 0.15       # Reward for being in a clear lane
+    look_ahead_distance: 50.0     # Distance to look ahead for obstacles
+    slow_vehicle_threshold: 0.7   # Consider vehicle slow if < 70% of ego speed
+    # Safety and other rewards
+    safe_distance_reward: 0.1
+    min_safe_distance: 15.0
+    safe_distance_penalty: 0.3
+    on_road_reward: 0.1
+    off_road_penalty: -0.5
+    heading_reward: 0.1
+    progress_reward_scale: 0.01
+    survival_reward: 0.01
+    success_reward: 0.5
+    shaped_reward_weight: 0.8
 
 highway_kinematics:
   task: highway_highway
@@ -264,6 +292,22 @@ intersection:
   imag_gradient: 'reinforce'
   highway_obs_type: 'image'
   highway_action_type: 'discrete'
+  # Intersection uses initial_vehicle_count (vehicles_count is converted)
+  highway_vehicles_count: 15        # initial_vehicle_count (max ~20)
+  highway_vehicles_density: 1.2     # Converted to spawn_probability
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.3
+    reward_speed_range: [8, 15]
+    collision_reward: -1.0
+    safe_distance_reward: 0.15
+    min_safe_distance: 10.0
+    safe_distance_penalty: 0.4
+    on_road_reward: 0.1
+    heading_reward: 0.15
+    survival_reward: 0.02
+    success_reward: 1.0
+    shaped_reward_weight: 0.8
 
 parking:
   task: highway_parking
@@ -283,6 +327,17 @@ parking:
   imag_gradient: 'dynamics'
   highway_obs_type: 'image'
   highway_action_type: 'continuous'
+  highway_reward_shaping: True
+  highway_reward_config:
+    collision_reward: -1.0
+    safe_distance_reward: 0.1
+    min_safe_distance: 3.0
+    safe_distance_penalty: 0.5
+    heading_reward: 0.3
+    on_road_reward: 0.2
+    survival_reward: 0.01
+    success_reward: 2.0
+    shaped_reward_weight: 0.7
 
 merge:
   task: highway_merge
@@ -301,6 +356,21 @@ merge:
   imag_gradient: 'reinforce'
   highway_obs_type: 'image'
   highway_action_type: 'discrete'
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.35
+    reward_speed_range: [20, 28]
+    collision_reward: -1.0
+    safe_distance_reward: 0.15
+    min_safe_distance: 12.0
+    safe_distance_penalty: 0.4
+    lane_change_reward: -0.1
+    on_road_reward: 0.1
+    heading_reward: 0.1
+    progress_reward_scale: 0.015
+    survival_reward: 0.01
+    success_reward: 0.8
+    shaped_reward_weight: 0.8
 
 roundabout:
   task: highway_roundabout
@@ -319,6 +389,21 @@ roundabout:
   imag_gradient: 'reinforce'
   highway_obs_type: 'image'
   highway_action_type: 'discrete'
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.25
+    reward_speed_range: [8, 15]
+    collision_reward: -1.0
+    safe_distance_reward: 0.2
+    min_safe_distance: 8.0
+    safe_distance_penalty: 0.4
+    lane_change_reward: -0.03
+    on_road_reward: 0.15
+    heading_reward: 0.2
+    progress_reward_scale: 0.01
+    survival_reward: 0.02
+    success_reward: 1.0
+    shaped_reward_weight: 0.8
 
 racetrack:
   task: highway_racetrack
@@ -338,3 +423,21 @@ racetrack:
   imag_gradient: 'dynamics'
   highway_obs_type: 'image'
   highway_action_type: 'continuous'
+  # Racetrack uses other_vehicles parameter (max ~10)
+  highway_vehicles_count: 5         # other_vehicles on track
+  highway_vehicles_density: 1.0
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.5
+    reward_speed_range: [15, 25]
+    collision_reward: -1.0
+    safe_distance_reward: 0.1
+    min_safe_distance: 10.0
+    safe_distance_penalty: 0.3
+    on_road_reward: 0.2
+    off_road_penalty: -0.8
+    heading_reward: 0.25
+    progress_reward_scale: 0.02
+    survival_reward: 0.01
+    success_reward: 1.0
+    shaped_reward_weight: 0.85

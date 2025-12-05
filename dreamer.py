@@ -199,9 +199,12 @@ def make_env(config, mode, id):
 
         obs_type = getattr(config, 'highway_obs_type', 'image')
         action_type = getattr(config, 'highway_action_type', 'discrete')
+        use_reward_shaping = getattr(config, 'highway_reward_shaping', True)
+        reward_config = getattr(config, 'highway_reward_config', None)
+        vehicles_count = getattr(config, 'highway_vehicles_count', 50)
+        vehicles_density = getattr(config, 'highway_vehicles_density', 1.5)
         
         if obs_type == "kinematics":
-            vehicles_count = getattr(config, 'highway_vehicles_count', 5)
             env = highway.HighwayEnvKinematics(
                 task,
                 action_repeat=config.action_repeat,
@@ -217,6 +220,10 @@ def make_env(config, mode, id):
                 obs_type=obs_type,
                 action_type=action_type,
                 seed=config.seed + id,
+                use_reward_shaping=use_reward_shaping,
+                reward_config=reward_config,
+                vehicles_count=vehicles_count,
+                vehicles_density=vehicles_density,
             )
         
         if action_type == "discrete":
