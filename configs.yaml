@@ -202,17 +202,17 @@ highway:
   task: highway_highway
   steps: 1e5
   action_repeat: 1
-  envs: 4                   # 4 parallel environments for faster data collection
-  batch_size: 32            # Larger batches for better GPU utilization
-  train_ratio: 128          # More gradient steps per env step
+  envs: 2                   # Reduced from 4 (other processes using GPU)
+  batch_size: 20            # Reduced from 32
+  train_ratio: 96           # Reduced from 128
   time_limit: 200
   eval_every: 5e3
   log_every: 1e3
   video_pred_log: true
   size: [64, 64]
   grayscale: False
-  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 48, mlp_layers: 5, mlp_units: 1024}  # Increased capacity
-  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 48, mlp_layers: 5, mlp_units: 1024}  # Increased capacity
+  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 40, mlp_layers: 5, mlp_units: 1024}  # Reduced from 48
+  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 40, mlp_layers: 5, mlp_units: 1024}  # Reduced from 48
   actor: {layers: 2, dist: 'onehot', std: 'none'}
   imag_gradient: 'reinforce'
   # Highway-env specific settings
