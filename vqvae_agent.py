@@ -600,19 +600,22 @@ class VQVAEAgent(nn.Module):
 
     def _train_vqvae(self, images):
         """Train VQ-VAE on batch of images."""
-        self.vqvae.train()
-        B, T, C, H, W = images.shape
-        images_flat = images.view(B * T, C, H, W)
+        import tools
+        
+        with tools.RequiresGrad(self.vqvae):
+            self.vqvae.train()
+            B, T, C, H, W = images.shape
+            images_flat = images.view(B * T, C, H, W)
 
-        out = self.vqvae(images_flat)
-        recon_nll = continuous_bernoulli_nll(images_flat, out["logits"])
-        vq_loss = out["vq_loss"]
-        loss = recon_nll + vq_loss
+            out = self.vqvae(images_flat)
+            recon_nll = continuous_bernoulli_nll(images_flat, out["logits"])
+            vq_loss = out["vq_loss"]
+            loss = recon_nll + vq_loss
 
-        self.vqvae_opt.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.vqvae.parameters(), 1.0)
-        self.vqvae_opt.step()
+            self.vqvae_opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.vqvae.parameters(), 1.0)
+            self.vqvae_opt.step()
 
         return {
             "vqvae_loss": loss.item(),
@@ -622,39 +625,42 @@ class VQVAEAgent(nn.Module):
 
     def _train_dynamics(self, images, actions, rewards):
         """Train dynamics model on sequences."""
-        self.dynamics.train()
-        self.vqvae.eval()
-
-        B, T, C, H, W = images.shape
-        images_flat = images.view(B * T, C, H, W)
+        import tools
         
-        with torch.no_grad():
-            indices_flat = self.vqvae.encode_indices(images_flat)
-        indices = indices_flat.view(B, T, self.latent_size, self.latent_size)
+        with tools.RequiresGrad(self.dynamics):
+            self.dynamics.train()
+            self.vqvae.eval()
 
-        state = None
-        latent_loss = 0.0
-        reward_loss = 0.0
-        seq_len = T - 1
+            B, T, C, H, W = images.shape
+            images_flat = images.view(B * T, C, H, W)
+            
+            with torch.no_grad():
+                indices_flat = self.vqvae.encode_indices(images_flat)
+            indices = indices_flat.view(B, T, self.latent_size, self.latent_size)
 
-        for t in range(seq_len):
-            idx_t = indices[:, t]
-            idx_tp1 = indices[:, t + 1]
-            a_t = actions[:, t]
-            r_t = rewards[:, t]
+            state = None
+            latent_loss = 0.0
+            reward_loss = 0.0
+            seq_len = T - 1
 
-            latent_logits, reward_pred, state = self.dynamics(idx_t, a_t, state)
-            latent_loss = latent_loss + F.cross_entropy(latent_logits, idx_tp1.long())
-            reward_loss = reward_loss + F.mse_loss(reward_pred, r_t)
+            for t in range(seq_len):
+                idx_t = indices[:, t]
+                idx_tp1 = indices[:, t + 1]
+                a_t = actions[:, t]
+                r_t = rewards[:, t]
 
-        latent_loss = latent_loss / seq_len
-        reward_loss = reward_loss / seq_len
-        loss = latent_loss + 0.1 * reward_loss
+                latent_logits, reward_pred, state = self.dynamics(idx_t, a_t, state)
+                latent_loss = latent_loss + F.cross_entropy(latent_logits, idx_tp1.long())
+                reward_loss = reward_loss + F.mse_loss(reward_pred, r_t)
 
-        self.dynamics_opt.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.dynamics.parameters(), 1.0)
-        self.dynamics_opt.step()
+            latent_loss = latent_loss / seq_len
+            reward_loss = reward_loss / seq_len
+            loss = latent_loss + 0.1 * reward_loss
+
+            self.dynamics_opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.dynamics.parameters(), 1.0)
+            self.dynamics_opt.step()
 
         return {
             "dynamics_loss": loss.item(),
@@ -664,98 +670,101 @@ class VQVAEAgent(nn.Module):
 
     def _train_policy_imagination(self, images):
         """Train policy using imagined rollouts."""
-        self.policy.train()
-        self.dynamics.eval()
-
-        B, T, C, H, W = images.shape
-        horizon = min(self._config.imag_horizon, 15)
-
-        # Sample starting states
-        t_starts = torch.randint(0, T, (B,))
-        start_images = torch.stack([images[b, t_starts[b]] for b in range(B)])
+        import tools
         
-        with torch.no_grad():
-            start_indices = self.vqvae.encode_indices(start_images)
+        with tools.RequiresGrad(self.policy):
+            self.policy.train()
+            self.dynamics.eval()
 
-        sim_env = LatentSpaceEnv(self.dynamics, horizon=horizon, device=str(self._config.device))
-        
-        obs_idx_list, act_list, logp_list, rew_list, done_list, val_list = [], [], [], [], [], []
-        
-        sim_env.reset(start_indices)
-        
-        for t in range(horizon):
-            logits, value = self.policy(sim_env.indices)
-            dist = torch.distributions.Categorical(logits=logits)
-            action = dist.sample()
-            logp = dist.log_prob(action)
+            B, T, C, H, W = images.shape
+            horizon = min(self._config.imag_horizon, 15)
 
-            next_idx, reward, done, _ = sim_env.step(action)
+            # Sample starting states
+            t_starts = torch.randint(0, T, (B,))
+            start_images = torch.stack([images[b, t_starts[b]] for b in range(B)])
+            
+            with torch.no_grad():
+                start_indices = self.vqvae.encode_indices(start_images)
 
-            obs_idx_list.append(sim_env.indices.detach())
-            act_list.append(action.detach())
-            logp_list.append(logp.detach())
-            rew_list.append(reward.detach())
-            done_list.append(torch.full((B,), float(done), device=self._config.device))
-            val_list.append(value.detach())
-
-        with torch.no_grad():
-            _, last_value = self.policy(sim_env.indices)
-        val_list.append(last_value.detach())
-
-        obs_idx = torch.stack(obs_idx_list, dim=0)
-        actions = torch.stack(act_list, dim=0)
-        old_logp = torch.stack(logp_list, dim=0)
-        rewards = torch.stack(rew_list, dim=0)
-        dones = torch.stack(done_list, dim=0).bool()
-        values = torch.stack(val_list, dim=0)
-
-        adv, returns = compute_gae(rewards, values, dones, 
-                                    gamma=self._config.discount, 
-                                    lam=self._config.discount_lambda)
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
-
-        Th, Bh = rewards.shape
-        flat_n = Th * Bh
-
-        obs_flat = obs_idx.view(flat_n, self.latent_size, self.latent_size)
-        act_flat = actions.view(flat_n)
-        old_logp_flat = old_logp.view(flat_n)
-        adv_flat = adv.view(flat_n)
-        ret_flat = returns.view(flat_n)
-
-        policy_losses, value_losses, entropies = [], [], []
-
-        for _ in range(self.ppo_cfg.ppo_epochs):
-            perm = torch.randperm(flat_n, device=self._config.device)
-            for start in range(0, flat_n, self.ppo_cfg.minibatch_size):
-                mb_idx = perm[start:start + self.ppo_cfg.minibatch_size]
-                mb_obs = obs_flat[mb_idx]
-                mb_act = act_flat[mb_idx]
-                mb_old_logp = old_logp_flat[mb_idx]
-                mb_adv = adv_flat[mb_idx]
-                mb_ret = ret_flat[mb_idx]
-
-                logits, value = self.policy(mb_obs)
+            sim_env = LatentSpaceEnv(self.dynamics, horizon=horizon, device=str(self._config.device))
+            
+            obs_idx_list, act_list, logp_list, rew_list, done_list, val_list = [], [], [], [], [], []
+            
+            sim_env.reset(start_indices)
+            
+            for t in range(horizon):
+                logits, value = self.policy(sim_env.indices)
                 dist = torch.distributions.Categorical(logits=logits)
-                logp = dist.log_prob(mb_act)
-                entropy = dist.entropy().mean()
+                action = dist.sample()
+                logp = dist.log_prob(action)
 
-                ratio = torch.exp(logp - mb_old_logp)
-                surr1 = ratio * mb_adv
-                surr2 = torch.clamp(ratio, 1.0 - self.ppo_cfg.clip_range, 1.0 + self.ppo_cfg.clip_range) * mb_adv
-                policy_loss = -torch.min(surr1, surr2).mean()
-                value_loss = F.mse_loss(value, mb_ret)
+                next_idx, reward, done, _ = sim_env.step(action)
 
-                loss = policy_loss + self.ppo_cfg.value_coef * value_loss - self.ppo_cfg.entropy_coef * entropy
+                obs_idx_list.append(sim_env.indices.detach())
+                act_list.append(action.detach())
+                logp_list.append(logp.detach())
+                rew_list.append(reward.detach())
+                done_list.append(torch.full((B,), float(done), device=self._config.device))
+                val_list.append(value.detach())
 
-                self.policy_opt.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.ppo_cfg.max_grad_norm)
-                self.policy_opt.step()
+            with torch.no_grad():
+                _, last_value = self.policy(sim_env.indices)
+            val_list.append(last_value.detach())
 
-                policy_losses.append(policy_loss.item())
-                value_losses.append(value_loss.item())
-                entropies.append(entropy.item())
+            obs_idx = torch.stack(obs_idx_list, dim=0)
+            actions = torch.stack(act_list, dim=0)
+            old_logp = torch.stack(logp_list, dim=0)
+            rewards = torch.stack(rew_list, dim=0)
+            dones = torch.stack(done_list, dim=0).bool()
+            values = torch.stack(val_list, dim=0)
+
+            adv, returns = compute_gae(rewards, values, dones, 
+                                        gamma=self._config.discount, 
+                                        lam=self._config.discount_lambda)
+            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+            Th, Bh = rewards.shape
+            flat_n = Th * Bh
+
+            obs_flat = obs_idx.view(flat_n, self.latent_size, self.latent_size)
+            act_flat = actions.view(flat_n)
+            old_logp_flat = old_logp.view(flat_n)
+            adv_flat = adv.view(flat_n)
+            ret_flat = returns.view(flat_n)
+
+            policy_losses, value_losses, entropies = [], [], []
+
+            for _ in range(self.ppo_cfg.ppo_epochs):
+                perm = torch.randperm(flat_n, device=self._config.device)
+                for start in range(0, flat_n, self.ppo_cfg.minibatch_size):
+                    mb_idx = perm[start:start + self.ppo_cfg.minibatch_size]
+                    mb_obs = obs_flat[mb_idx]
+                    mb_act = act_flat[mb_idx]
+                    mb_old_logp = old_logp_flat[mb_idx]
+                    mb_adv = adv_flat[mb_idx]
+                    mb_ret = ret_flat[mb_idx]
+
+                    logits, value = self.policy(mb_obs)
+                    dist = torch.distributions.Categorical(logits=logits)
+                    logp = dist.log_prob(mb_act)
+                    entropy = dist.entropy().mean()
+
+                    ratio = torch.exp(logp - mb_old_logp)
+                    surr1 = ratio * mb_adv
+                    surr2 = torch.clamp(ratio, 1.0 - self.ppo_cfg.clip_range, 1.0 + self.ppo_cfg.clip_range) * mb_adv
+                    policy_loss = -torch.min(surr1, surr2).mean()
+                    value_loss = F.mse_loss(value, mb_ret)
+
+                    loss = policy_loss + self.ppo_cfg.value_coef * value_loss - self.ppo_cfg.entropy_coef * entropy
+
+                    self.policy_opt.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.ppo_cfg.max_grad_norm)
+                    self.policy_opt.step()
+
+                    policy_losses.append(policy_loss.item())
+                    value_losses.append(value_loss.item())
+                    entropies.append(entropy.item())
 
         return {
             "ppo_policy_loss": float(np.mean(policy_losses)) if policy_losses else 0.0,
