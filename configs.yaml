@@ -203,7 +203,7 @@ highway:
   steps: 1e5
   action_repeat: 1
   envs: 2                   # Reduced from 4 (other processes using GPU)
-  batch_size: 20            # Reduced from 32
+  batch_size: 16            # Reduced from 32
   train_ratio: 96           # Reduced from 128
   time_limit: 200
   eval_every: 5e3
