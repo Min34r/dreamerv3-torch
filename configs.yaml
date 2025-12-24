@@ -202,33 +202,31 @@ highway:
   task: highway_highway
   steps: 1e5
   action_repeat: 1
-  envs: 2                   # Reduced from 4 (other processes using GPU)
-  batch_size: 16            # Reduced from 32
-  train_ratio: 96           # Reduced from 128
+  envs: 1
+  batch_size: 16
+  train_ratio: 64
   time_limit: 200
   eval_every: 5e3
   log_every: 1e3
   video_pred_log: true
   size: [64, 64]
   grayscale: False
-  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 40, mlp_layers: 5, mlp_units: 1024}  # Reduced from 48
-  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 40, mlp_layers: 5, mlp_units: 1024}  # Reduced from 48
+  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 48, mlp_layers: 5, mlp_units: 1024}
+  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 48, mlp_layers: 5, mlp_units: 1024}
   actor: {layers: 2, dist: 'onehot', std: 'none'}
   imag_gradient: 'reinforce'
   # Highway-env specific settings
   highway_obs_type: 'image'
   highway_action_type: 'discrete'
   # Vehicle density settings
-  highway_vehicles_count: 50      # Number of vehicles (default was ~5, now 50)
-  highway_vehicles_density: 1.5   # Density of vehicles on road
+  highway_vehicles_count: 50
+  highway_vehicles_density: 1.5
   # Reward shaping configuration
   highway_reward_shaping: True
   highway_reward_config:
-    # 1) Speed – still important, but less overpowering
-    high_speed_reward: 0.4            # from 0.6 -> 0.4
-    reward_speed_range: [23.0, 27.0]  # ~83-97 km/h (matches traffic speed)
-    # 2) Safety: MUCH stronger
-    collision_reward: -5.0            # from -2.0 -> -5.0
+    high_speed_reward: 0.4
+    reward_speed_range: [23.0, 27.0]
+    collision_reward: -5.0
     on_road_reward: 0.02
     # 3) Lane behavior – push harder to escape blocking
     lane_change_reward: 0.0
@@ -468,15 +466,11 @@ highway_vqvae:
   video_pred_log: false
   size: [64, 64]
   grayscale: False
-  # Use VQ-VAE world model instead of Dreamer
   world_model: 'vqvae'
-  # VQ-VAE hyperparameters
   vqvae_embedding_dim: 32
   vqvae_num_embeddings: 128
   vqvae_hidden_channels: 256
-  # Actor config for VQ-VAE (uses PPO internally)
   actor: {layers: 2, dist: 'onehot', std: 'none', lr: 2.5e-4, eps: 1e-5, grad_clip: 0.5}
-  # Highway-env specific settings
   highway_obs_type: 'image'
   highway_action_type: 'discrete'
   highway_vehicles_count: 50
