@@ -7,6 +7,7 @@ import pathlib
 import re
 import time
 import random
+import tempfile
 
 import numpy as np
 
@@ -126,7 +127,18 @@ class Logger:
             for b in range(B):
                 video_data = value[b]  # Shape: (T, H, W, C)
                 batch_name = f"{name}_batch{b}" if B > 1 else name
-                self._experiment.log_video(video_data, name=batch_name, step=step)
+                # Comet requires a file path, save to temp file
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                    tmp_path = tmp.name
+                try:
+                    # Use imageio to write video
+                    import imageio
+                    imageio.mimwrite(tmp_path, video_data, fps=16, codec='h264')
+                    self._experiment.log_video(tmp_path, name=batch_name, step=step)
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
 
         self._scalars = {}
         self._images = {}
@@ -155,7 +167,18 @@ class Logger:
         for b in range(B):
             video_data = value[b]  # Shape: (T, H, W, C)
             batch_name = f"{name}_batch{b}" if B > 1 else name
-            self._experiment.log_video(video_data, name=batch_name, step=step)
+            # Comet requires a file path, save to temp file
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                # Use imageio to write video
+                import imageio
+                imageio.mimwrite(tmp_path, video_data, fps=16, codec='h264')
+                self._experiment.log_video(tmp_path, name=batch_name, step=step)
+            finally:
+                # Clean up temp file
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
 
 
 def simulate(
