@@ -126,7 +126,7 @@ class Logger:
             for b in range(B):
                 video_data = value[b]  # Shape: (T, H, W, C)
                 batch_name = f"{name}_batch{b}" if B > 1 else name
-                self._experiment.log_video(video_data, name=batch_name, step=step, fps=16)
+                self._experiment.log_video(video_data, name=batch_name, step=step)
 
         self._scalars = {}
         self._images = {}
@@ -155,7 +155,7 @@ class Logger:
         for b in range(B):
             video_data = value[b]  # Shape: (T, H, W, C)
             batch_name = f"{name}_batch{b}" if B > 1 else name
-            self._experiment.log_video(video_data, name=batch_name, step=step, fps=16)
+            self._experiment.log_video(video_data, name=batch_name, step=step)
 
 
 def simulate(
