@@ -59,7 +59,7 @@ class TimeRecording:
 class Logger:
     def __init__(self, logdir, step):
         self._logdir = logdir
-        # Initialize Comet experiment
+        # Initialize Comet experiment with same configuration as TensorBoard
         self._experiment = Experiment(
             api_key=os.environ.get('COMET_API_KEY'),
             project_name=os.environ.get('COMET_PROJECT_NAME', 'dreamerv3-torch'),
@@ -99,31 +99,30 @@ class Logger:
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
         
-        # Log scalars to Comet (preserve TensorBoard naming convention)
+        # Log scalars to Comet - match TensorBoard naming convention exactly
         for name, value in scalars:
             if "/" not in name:
-                # Match TensorBoard's "scalars/" prefix for metrics without namespace
-                self._experiment.log_metric(f"scalars/{name}", value, step=step)
+                # TensorBoard added "scalars/" prefix for names without namespace
+                self._experiment.log_metric("scalars/" + name, value, step=step)
             else:
                 self._experiment.log_metric(name, value, step=step)
         
-        # Log images to Comet
+        # Log images to Comet - TensorBoard format is CHW, Comet expects HWC
         for name, value in self._images.items():
-            # Comet expects HWC format for images
-            # If CHW format (channels first), transpose to HWC
+            # TensorBoard receives CHW format, convert to HWC for Comet
             if value.ndim == 3 and value.shape[0] in [1, 3, 4]:
                 value = value.transpose(1, 2, 0)
             self._experiment.log_image(value, name=name, step=step)
         
-        # Log videos to Comet
+        # Log videos to Comet - TensorBoard concatenated batches, we log separately
         for name, value in self._videos.items():
             name = name if isinstance(name, str) else name.decode("utf-8")
             if np.issubdtype(value.dtype, np.floating):
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
             B, T, H, W, C = value.shape
-            
-            # Log all batches to match TensorBoard behavior
-            # TensorBoard concatenated batches horizontally, we'll log them separately
+            # TensorBoard: value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
+            # This concatenates batches horizontally into single video
+            # For Comet, log each batch separately for better viewing
             for b in range(B):
                 video_data = value[b]  # Shape: (T, H, W, C)
                 batch_name = f"{name}_batch{b}" if B > 1 else name
@@ -145,18 +144,18 @@ class Logger:
         return steps / duration
 
     def offline_scalar(self, name, value, step):
-        # Match TensorBoard's "scalars/" prefix
-        self._experiment.log_metric(f"scalars/{name}", value, step=step)
+        # Match TensorBoard's naming convention
+        self._experiment.log_metric("scalars/" + name, value, step=step)
 
     def offline_video(self, name, value, step):
         if np.issubdtype(value.dtype, np.floating):
             value = np.clip(255 * value, 0, 255).astype(np.uint8)
-        B, T, all batches to match TensorBoard behavior
+        B, T, H, W, C = value.shape
+        # TensorBoard concatenated batches, we log separately
         for b in range(B):
             video_data = value[b]  # Shape: (T, H, W, C)
             batch_name = f"{name}_batch{b}" if B > 1 else name
-            self._experiment.log_video(video_data, name=batch_
-        self._experiment.log_video(video_data, name=name, step=step, fps=16)
+            self._experiment.log_video(video_data, name=batch_name, step=step, fps=16)
 
 
 def simulate(
