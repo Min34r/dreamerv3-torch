@@ -10,11 +10,13 @@ import random
 
 import numpy as np
 
+# Import comet_ml before torch for automatic data logging
+from comet_ml import Experiment
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch import distributions as torchd
-from comet_ml import Experiment
 
 
 to_np = lambda x: x.detach().cpu().numpy()
