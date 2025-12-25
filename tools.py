@@ -14,7 +14,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch import distributions as torchd
-from torch.utils.tensorboard import SummaryWriter
+from comet_ml import Experiment
 
 
 to_np = lambda x: x.detach().cpu().numpy()
@@ -57,7 +57,20 @@ class TimeRecording:
 class Logger:
     def __init__(self, logdir, step):
         self._logdir = logdir
-        self._writer = SummaryWriter(log_dir=str(logdir), max_queue=1000)
+        # Initialize Comet experiment
+        self._experiment = Experiment(
+            api_key=os.environ.get('COMET_API_KEY'),
+            project_name=os.environ.get('COMET_PROJECT_NAME', 'dreamerv3-torch'),
+            workspace=os.environ.get('COMET_WORKSPACE'),
+            auto_metric_logging=False,
+            auto_param_logging=False,
+            log_code=False,
+            log_graph=False,
+            log_git_metadata=False,
+            log_git_patch=False,
+        )
+        self._experiment.set_name(os.environ.get('COMET_EXPERIMENT_NAME', str(logdir.name)))
+        self._experiment.log_other('logdir', str(logdir))
         self._last_step = None
         self._last_time = None
         self._scalars = {}
@@ -83,22 +96,29 @@ class Logger:
         print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
+        
+        # Log scalars to Comet
         for name, value in scalars:
-            if "/" not in name:
-                self._writer.add_scalar("scalars/" + name, value, step)
-            else:
-                self._writer.add_scalar(name, value, step)
+            self._experiment.log_metric(name, value, step=step)
+        
+        # Log images to Comet
         for name, value in self._images.items():
-            self._writer.add_image(name, value, step)
+            # Convert to HWC format if needed
+            if value.ndim == 3 and value.shape[0] in [1, 3, 4]:
+                value = value.transpose(1, 2, 0)
+            self._experiment.log_image(value, name=name, step=step)
+        
+        # Log videos to Comet
         for name, value in self._videos.items():
             name = name if isinstance(name, str) else name.decode("utf-8")
             if np.issubdtype(value.dtype, np.floating):
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
             B, T, H, W, C = value.shape
-            value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
-            self._writer.add_video(name, value, step, 16)
+            # Log each batch item as a separate video or just the first one
+            for b in range(min(B, 1)):  # Only log first batch to save bandwidth
+                video_data = value[b]  # Shape: (T, H, W, C)
+                self._experiment.log_video(video_data, name=f"{name}_batch{b}", step=step, fps=16)
 
-        self._writer.flush()
         self._scalars = {}
         self._images = {}
         self._videos = {}
@@ -115,14 +135,15 @@ class Logger:
         return steps / duration
 
     def offline_scalar(self, name, value, step):
-        self._writer.add_scalar("scalars/" + name, value, step)
+        self._experiment.log_metric(name, value, step=step)
 
     def offline_video(self, name, value, step):
         if np.issubdtype(value.dtype, np.floating):
             value = np.clip(255 * value, 0, 255).astype(np.uint8)
         B, T, H, W, C = value.shape
-        value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
-        self._writer.add_video(name, value, step, 16)
+        # Log first batch item as video
+        video_data = value[0]  # Shape: (T, H, W, C)
+        self._experiment.log_video(video_data, name=name, step=step, fps=16)
 
 
 def simulate(
