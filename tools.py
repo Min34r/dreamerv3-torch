@@ -99,13 +99,18 @@ class Logger:
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
         
-        # Log scalars to Comet
+        # Log scalars to Comet (preserve TensorBoard naming convention)
         for name, value in scalars:
-            self._experiment.log_metric(name, value, step=step)
+            if "/" not in name:
+                # Match TensorBoard's "scalars/" prefix for metrics without namespace
+                self._experiment.log_metric(f"scalars/{name}", value, step=step)
+            else:
+                self._experiment.log_metric(name, value, step=step)
         
         # Log images to Comet
         for name, value in self._images.items():
-            # Convert to HWC format if needed
+            # Comet expects HWC format for images
+            # If CHW format (channels first), transpose to HWC
             if value.ndim == 3 and value.shape[0] in [1, 3, 4]:
                 value = value.transpose(1, 2, 0)
             self._experiment.log_image(value, name=name, step=step)
@@ -116,10 +121,13 @@ class Logger:
             if np.issubdtype(value.dtype, np.floating):
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
             B, T, H, W, C = value.shape
-            # Log each batch item as a separate video or just the first one
-            for b in range(min(B, 1)):  # Only log first batch to save bandwidth
+            
+            # Log all batches to match TensorBoard behavior
+            # TensorBoard concatenated batches horizontally, we'll log them separately
+            for b in range(B):
                 video_data = value[b]  # Shape: (T, H, W, C)
-                self._experiment.log_video(video_data, name=f"{name}_batch{b}", step=step, fps=16)
+                batch_name = f"{name}_batch{b}" if B > 1 else name
+                self._experiment.log_video(video_data, name=batch_name, step=step, fps=16)
 
         self._scalars = {}
         self._images = {}
@@ -137,14 +145,17 @@ class Logger:
         return steps / duration
 
     def offline_scalar(self, name, value, step):
-        self._experiment.log_metric(name, value, step=step)
+        # Match TensorBoard's "scalars/" prefix
+        self._experiment.log_metric(f"scalars/{name}", value, step=step)
 
     def offline_video(self, name, value, step):
         if np.issubdtype(value.dtype, np.floating):
             value = np.clip(255 * value, 0, 255).astype(np.uint8)
-        B, T, H, W, C = value.shape
-        # Log first batch item as video
-        video_data = value[0]  # Shape: (T, H, W, C)
+        B, T, all batches to match TensorBoard behavior
+        for b in range(B):
+            video_data = value[b]  # Shape: (T, H, W, C)
+            batch_name = f"{name}_batch{b}" if B > 1 else name
+            self._experiment.log_video(video_data, name=batch_
         self._experiment.log_video(video_data, name=name, step=step, fps=16)
 
 
