@@ -259,8 +259,9 @@ def main(config):
     step = count_steps(config.traindir)
     # step in logger is environmental step
     logger = tools.Logger(logdir, config.action_repeat * step)
-
-    print("Create envs.")
+    
+    try:
+        print("Create envs.")
     if config.offline_traindir:
         directory = config.offline_traindir.format(**vars(config))
     else:
@@ -373,11 +374,17 @@ def main(config):
         torch.save(items_to_save, checkpoint_path)
         # Log model to Comet
         logger.log_model(checkpoint_path, model_name="agent_checkpoint", step=logger.step)
-    for env in train_envs + eval_envs:
-        try:
-            env.close()
-        except Exception:
-            pass
+    except Exception as e:
+        # Log exception to Comet before crashing
+        import sys
+        logger.log_exception(type(e), e, sys.exc_info()[2])
+        raise
+    finally:
+        for env in train_envs + eval_envs:
+            try:
+                env.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

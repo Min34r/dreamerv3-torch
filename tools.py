@@ -95,6 +95,14 @@ class Logger:
         if model_name is None:
             model_name = os.path.basename(model_path)
         self._experiment.log_model(model_name, str(model_path), step=step)
+    
+    def log_exception(self, exc_type, exc_value, exc_traceback):
+        """Log exception details to Comet ML."""
+        import traceback
+        error_message = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        self._experiment.log_other('error', error_message)
+        self._experiment.log_other('error_type', exc_type.__name__)
+        self._experiment.log_other('error_message', str(exc_value))
 
     def write(self, fps=False, step=False):
         if not step:

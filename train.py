@@ -164,130 +164,137 @@ def main(config):
     config.evaldir.mkdir(parents=True, exist_ok=True)
     step = count_steps(config.traindir)
     logger = tools.Logger(logdir, config.action_repeat * step)
-
-    print("Create envs.")
-    if config.offline_traindir:
-        directory = config.offline_traindir.format(**vars(config))
-    else:
-        directory = config.traindir
-    train_eps = tools.load_episodes(directory, limit=config.dataset_size)
-    if config.offline_evaldir:
-        directory = config.offline_evaldir.format(**vars(config))
-    else:
-        directory = config.evaldir
-    eval_eps = tools.load_episodes(directory, limit=1)
-    make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
-    if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
-    else:
-        train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
-    acts = train_envs[0].action_space
-    print("Action Space", acts)
-    config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
-
-    state = None
-    if not config.offline_traindir:
-        prefill = max(0, config.prefill - count_steps(config.traindir))
-        print(f"Prefill dataset ({prefill} steps).")
-        if hasattr(acts, "discrete"):
-            random_actor = tools.OneHotDist(
-                torch.zeros(config.num_actions).repeat(config.envs, 1)
-            )
+    
+    try:
+        print("Create envs.")
+        if config.offline_traindir:
+            directory = config.offline_traindir.format(**vars(config))
         else:
-            random_actor = torchd.independent.Independent(
-                torchd.uniform.Uniform(
-                    torch.tensor(acts.low).repeat(config.envs, 1),
-                    torch.tensor(acts.high).repeat(config.envs, 1),
-                ),
-                1,
-            )
+            directory = config.traindir
+        train_eps = tools.load_episodes(directory, limit=config.dataset_size)
+        if config.offline_evaldir:
+            directory = config.offline_evaldir.format(**vars(config))
+        else:
+            directory = config.evaldir
+        eval_eps = tools.load_episodes(directory, limit=1)
+        make = lambda mode, id: make_env(config, mode, id)
+        train_envs = [make("train", i) for i in range(config.envs)]
+        eval_envs = [make("eval", i) for i in range(config.envs)]
+        if config.parallel:
+            train_envs = [Parallel(env, "process") for env in train_envs]
+            eval_envs = [Parallel(env, "process") for env in eval_envs]
+        else:
+            train_envs = [Damy(env) for env in train_envs]
+            eval_envs = [Damy(env) for env in eval_envs]
+        acts = train_envs[0].action_space
+        print("Action Space", acts)
+        config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
 
-        def random_agent(o, d, s):
-            action = random_actor.sample()
-            logprob = random_actor.log_prob(action)
-            return {"action": action, "logprob": logprob}, None
+        state = None
+        if not config.offline_traindir:
+            prefill = max(0, config.prefill - count_steps(config.traindir))
+            print(f"Prefill dataset ({prefill} steps).")
+            if hasattr(acts, "discrete"):
+                random_actor = tools.OneHotDist(
+                    torch.zeros(config.num_actions).repeat(config.envs, 1)
+                )
+            else:
+                random_actor = torchd.independent.Independent(
+                    torchd.uniform.Uniform(
+                        torch.tensor(acts.low).repeat(config.envs, 1),
+                        torch.tensor(acts.high).repeat(config.envs, 1),
+                    ),
+                    1,
+                )
 
-        state = tools.simulate(
-            random_agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=prefill,
-        )
-        logger.step += prefill * config.action_repeat
-        print(f"Logger: ({logger.step} steps).")
+            def random_agent(o, d, s):
+                action = random_actor.sample()
+                logprob = random_actor.log_prob(action)
+                return {"action": action, "logprob": logprob}, None
 
-    print("Simulate agent.")
-    train_dataset = make_dataset(train_eps, config)
-    eval_dataset = make_dataset(eval_eps, config)
-    
-    # Create agent using factory function
-    agent = create_agent(
-        train_envs[0].observation_space,
-        train_envs[0].action_space,
-        config,
-        logger,
-        train_dataset,
-    ).to(config.device)
-    
-    agent.requires_grad_(requires_grad=False)
-    if (logdir / "latest.pt").exists():
-        checkpoint = torch.load(logdir / "latest.pt", weights_only=False)
-        agent.load_state_dict(checkpoint["agent_state_dict"])
-        tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
-        if hasattr(agent, '_should_pretrain'):
-            agent._should_pretrain._once = False
-
-    # Main training loop
-    while agent._step < config.steps + config.eval_every:
-        logger.write()
-        if config.eval_episode_num > 0:
-            print("Start evaluation.")
-            eval_policy = functools.partial(agent, training=False)
-            tools.simulate(
-                eval_policy,
-                eval_envs,
-                eval_eps,
-                config.evaldir,
+            state = tools.simulate(
+                random_agent,
+                train_envs,
+                train_eps,
+                config.traindir,
                 logger,
-                is_eval=True,
-                episodes=config.eval_episode_num,
+                limit=config.dataset_size,
+                steps=prefill,
             )
-            # Video prediction only for agents that support it
-            if config.video_pred_log and hasattr(agent, '_wm') and agent._wm is not None:
-                video_pred = agent._wm.video_pred(next(eval_dataset))
-                if video_pred is not None:
-                    logger.video("eval_openl", to_np(video_pred))
-        print("Start training.")
-        state = tools.simulate(
-            agent,
-            train_envs,
-            train_eps,
-            config.traindir,
+            logger.step += prefill * config.action_repeat
+            print(f"Logger: ({logger.step} steps).")
+
+        print("Simulate agent.")
+        train_dataset = make_dataset(train_eps, config)
+        eval_dataset = make_dataset(eval_eps, config)
+        
+        # Create agent using factory function
+        agent = create_agent(
+            train_envs[0].observation_space,
+            train_envs[0].action_space,
+            config,
             logger,
-            limit=config.dataset_size,
-            steps=config.eval_every,
-            state=state,
-        )
-        items_to_save = {
-            "agent_state_dict": agent.state_dict(),
-            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
-        }
-        checkpoint_path = logdir / "latest.pt"
-        torch.save(items_to_save, checkpoint_path)
-        # Log model to Comet
-        logger.log_model(checkpoint_path, model_name="agent_checkpoint", step=logger.step)
-    for env in train_envs + eval_envs:
-        try:
-            env.close()
-        except Exception:
-            pass
+            train_dataset,
+        ).to(config.device)
+        
+        agent.requires_grad_(requires_grad=False)
+        if (logdir / "latest.pt").exists():
+            checkpoint = torch.load(logdir / "latest.pt", weights_only=False)
+            agent.load_state_dict(checkpoint["agent_state_dict"])
+            tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
+            if hasattr(agent, '_should_pretrain'):
+                agent._should_pretrain._once = False
+
+        # Main training loop
+        while agent._step < config.steps + config.eval_every:
+            logger.write()
+            if config.eval_episode_num > 0:
+                print("Start evaluation.")
+                eval_policy = functools.partial(agent, training=False)
+                tools.simulate(
+                    eval_policy,
+                    eval_envs,
+                    eval_eps,
+                    config.evaldir,
+                    logger,
+                    is_eval=True,
+                    episodes=config.eval_episode_num,
+                )
+                # Video prediction only for agents that support it
+                if config.video_pred_log and hasattr(agent, '_wm') and agent._wm is not None:
+                    video_pred = agent._wm.video_pred(next(eval_dataset))
+                    if video_pred is not None:
+                        logger.video("eval_openl", to_np(video_pred))
+            print("Start training.")
+            state = tools.simulate(
+                agent,
+                train_envs,
+                train_eps,
+                config.traindir,
+                logger,
+                limit=config.dataset_size,
+                steps=config.eval_every,
+                state=state,
+            )
+            items_to_save = {
+                "agent_state_dict": agent.state_dict(),
+                "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+            }
+            checkpoint_path = logdir / "latest.pt"
+            torch.save(items_to_save, checkpoint_path)
+            # Log model to Comet
+            logger.log_model(checkpoint_path, model_name="agent_checkpoint", step=logger.step)
+    except Exception as e:
+        # Log exception to Comet before crashing
+        import sys
+        logger.log_exception(type(e), e, sys.exc_info()[2])
+        raise
+    finally:
+        for env in train_envs + eval_envs:
+            try:
+                env.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
