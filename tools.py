@@ -90,6 +90,12 @@ class Logger:
     def video(self, name, value):
         self._videos[name] = np.array(value)
 
+    def log_model(self, model_path, model_name=None, step=None):
+        """Log model checkpoint to Comet ML."""
+        if model_name is None:
+            model_name = os.path.basename(model_path)
+        self._experiment.log_model(model_name, str(model_path), step=step)
+
     def write(self, fps=False, step=False):
         if not step:
             step = self.step

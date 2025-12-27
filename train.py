@@ -279,7 +279,10 @@ def main(config):
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
-        torch.save(items_to_save, logdir / "latest.pt")
+        checkpoint_path = logdir / "latest.pt"
+        torch.save(items_to_save, checkpoint_path)
+        # Log model to Comet
+        logger.log_model(checkpoint_path, model_name="agent_checkpoint", step=logger.step)
     for env in train_envs + eval_envs:
         try:
             env.close()
