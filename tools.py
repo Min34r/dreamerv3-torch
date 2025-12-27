@@ -94,8 +94,10 @@ class Logger:
         """Log model checkpoint to Comet ML Assets & Artifacts."""
         if model_name is None:
             model_name = os.path.basename(model_path)
+        print(f"[DEBUG] log_model called: path={model_path}, exists={os.path.exists(model_path)}, step={step}")
         # Use log_asset to appear in Assets & Artifacts section
         self._experiment.log_asset(str(model_path), file_name=model_name, step=step, overwrite=True)
+        print(f"[DEBUG] log_asset completed for {model_name}")
     
     def log_exception(self, exc_type, exc_value, exc_traceback):
         """Log exception details to Comet ML."""

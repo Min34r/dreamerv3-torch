@@ -57,8 +57,7 @@ ruamel.yaml==0.17.4
 scipy==1.16.3
 six==1.17.0
 sympy==1.13.1
-tensorboard==2.17.1
-tensorboard-data-server==0.7.2
+comet-ml==3.48.0
 torch==2.5.1+cu121
 torchvision==0.20.1+cu121
 tqdm==4.67.1

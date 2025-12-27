@@ -371,7 +371,9 @@ def main(config):
                 "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
             }
             checkpoint_path = logdir / "latest.pt"
+            print(f"[DEBUG] Saving checkpoint to {checkpoint_path}")
             torch.save(items_to_save, checkpoint_path)
+            print(f"[DEBUG] Checkpoint saved, file exists: {os.path.exists(checkpoint_path)}")
             # Log model to Comet
             logger.log_model(checkpoint_path, model_name="agent_checkpoint", step=logger.step)
     except Exception as e:

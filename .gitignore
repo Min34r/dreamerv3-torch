@@ -4,6 +4,9 @@ logdir*
 vis_*
 result*
 
+# Environment variables (contains secrets)
+.env
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
