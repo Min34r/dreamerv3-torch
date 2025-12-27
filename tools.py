@@ -91,10 +91,11 @@ class Logger:
         self._videos[name] = np.array(value)
 
     def log_model(self, model_path, model_name=None, step=None):
-        """Log model checkpoint to Comet ML."""
+        """Log model checkpoint to Comet ML Assets & Artifacts."""
         if model_name is None:
             model_name = os.path.basename(model_path)
-        self._experiment.log_model(model_name, str(model_path), step=step)
+        # Use log_asset to appear in Assets & Artifacts section
+        self._experiment.log_asset(str(model_path), file_name=model_name, step=step, overwrite=True)
     
     def log_exception(self, exc_type, exc_value, exc_traceback):
         """Log exception details to Comet ML."""
