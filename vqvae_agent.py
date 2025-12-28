@@ -308,6 +308,21 @@ class PolicyNetwork64(nn.Module):
         )
         self.action_head = nn.Linear(1024, num_actions)
         self.value_head = nn.Linear(1024, 1)
+        
+        # Initialize weights properly to prevent NaN
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Initialize network weights with small values."""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=0.01)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.orthogonal_(m.weight, gain=0.01)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
 
     def set_embeddings(self, embeddings: nn.Embedding):
         self.embeddings = embeddings
@@ -316,6 +331,15 @@ class PolicyNetwork64(nn.Module):
         if self.embeddings is None:
             raise RuntimeError("Embeddings not set.")
         z = self.embeddings(idx)
+        
+        # Check for NaN in embeddings
+        if torch.isnan(z).any() or torch.isinf(z).any():
+            print(f"[ERROR] NaN/Inf detected in PolicyNetwork64 embeddings!")
+            print(f"Indices: {idx}")
+            print(f"Embeddings stats: min={z.min()}, max={z.max()}, mean={z.mean()}")
+            # Return zeros as fallback
+            z = torch.zeros_like(z)
+        
         return z.permute(0, 3, 1, 2).contiguous()
 
     def forward(self, indices: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -692,8 +716,30 @@ class VQVAEAgent(nn.Module):
             
             sim_env.reset(start_indices)
             
+            # Track if we hit NaN and need to stop early
+            early_stop = False
+            actual_horizon = horizon
+            
             for t in range(horizon):
                 logits, value = self.policy(sim_env.indices)
+                
+                # Check for NaN/Inf in logits - stop rollout early if detected
+                if torch.isnan(logits).any() or torch.isinf(logits).any():
+                    print(f"[WARNING] NaN/Inf detected in logits at step {t}/{horizon}")
+                    print(f"  Logits range: [{logits.min():.4f}, {logits.max():.4f}]")
+                    print(f"  Stopping rollout early with {t} valid steps")
+                    early_stop = True
+                    actual_horizon = t
+                    break
+                
+                # Check for NaN/Inf in value
+                if torch.isnan(value).any() or torch.isinf(value).any():
+                    print(f"[WARNING] NaN/Inf detected in value at step {t}/{horizon}")
+                    print(f"  Stopping rollout early with {t} valid steps")
+                    early_stop = True
+                    actual_horizon = t
+                    break
+                
                 dist = torch.distributions.Categorical(logits=logits)
                 action = dist.sample()
                 logp = dist.log_prob(action)
@@ -707,8 +753,23 @@ class VQVAEAgent(nn.Module):
                 done_list.append(torch.full((B,), float(done), device=self._config.device))
                 val_list.append(value.detach())
 
+            # If we have no valid steps, skip this training batch
+            if actual_horizon == 0:
+                print("[ERROR] No valid steps in imagination rollout. Skipping PPO update.")
+                return {
+                    "policy_loss": 0.0,
+                    "value_loss": 0.0,
+                    "entropy": 0.0,
+                    "approx_kl": 0.0,
+                    "clipfrac": 0.0,
+                }
+
             with torch.no_grad():
                 _, last_value = self.policy(sim_env.indices)
+                # If last value has NaN, use zeros
+                if torch.isnan(last_value).any() or torch.isinf(last_value).any():
+                    print("[WARNING] NaN in final value, using zeros")
+                    last_value = torch.zeros_like(last_value)
             val_list.append(last_value.detach())
 
             obs_idx = torch.stack(obs_idx_list, dim=0)
@@ -745,6 +806,16 @@ class VQVAEAgent(nn.Module):
                     mb_ret = ret_flat[mb_idx]
 
                     logits, value = self.policy(mb_obs)
+                    
+                    # Check for NaN/Inf in policy output - skip this minibatch
+                    if torch.isnan(logits).any() or torch.isinf(logits).any():
+                        print(f"[WARNING] NaN/Inf in policy logits during minibatch training, skipping")
+                        continue
+                    
+                    if torch.isnan(value).any() or torch.isinf(value).any():
+                        print(f"[WARNING] NaN/Inf in value during minibatch training, skipping")
+                        continue
+                    
                     dist = torch.distributions.Categorical(logits=logits)
                     logp = dist.log_prob(mb_act)
                     entropy = dist.entropy().mean()
@@ -757,8 +828,27 @@ class VQVAEAgent(nn.Module):
 
                     loss = policy_loss + self.ppo_cfg.value_coef * value_loss - self.ppo_cfg.entropy_coef * entropy
 
+                    # Check for NaN/Inf in loss before backprop
+                    if torch.isnan(loss).any() or torch.isinf(loss).any():
+                        print(f"[WARNING] NaN/Inf in loss, skipping backprop")
+                        print(f"  policy_loss={policy_loss.item()}, value_loss={value_loss.item()}, entropy={entropy.item()}")
+                        continue
+
                     self.policy_opt.zero_grad()
                     loss.backward()
+                    
+                    # Check gradients for NaN/Inf
+                    has_nan_grad = False
+                    for name, param in self.policy.named_parameters():
+                        if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                            print(f"[WARNING] NaN/Inf gradient in {name}, skipping optimizer step")
+                            has_nan_grad = True
+                            break
+                    
+                    if has_nan_grad:
+                        self.policy_opt.zero_grad()
+                        continue
+                    
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.ppo_cfg.max_grad_norm)
                     self.policy_opt.step()
 
