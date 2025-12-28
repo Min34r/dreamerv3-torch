@@ -330,6 +330,14 @@ class PolicyNetwork64(nn.Module):
     def _embed_indices(self, idx: torch.Tensor) -> torch.Tensor:
         if self.embeddings is None:
             raise RuntimeError("Embeddings not set.")
+        
+        # Validate indices are within valid range
+        num_embeddings = self.embeddings.num_embeddings
+        if (idx < 0).any() or (idx >= num_embeddings).any():
+            print(f"[ERROR] Invalid indices detected! Range: [{idx.min()}, {idx.max()}], Expected: [0, {num_embeddings-1}]")
+            # Clamp to valid range
+            idx = torch.clamp(idx, 0, num_embeddings - 1)
+        
         z = self.embeddings(idx)
         
         # Check for NaN in embeddings
@@ -377,10 +385,32 @@ class LatentSpaceEnv:
         assert self.indices is not None
         latent_logits, reward_pred, self.state = self.dynamics(self.indices, action, self.state)
 
+        # Check for NaN/Inf in logits
+        if torch.isnan(latent_logits).any() or torch.isinf(latent_logits).any():
+            print(f"[WARNING] NaN/Inf in dynamics latent_logits at step {self.t}")
+            # Use uniform distribution as fallback
+            b, k, h, w = latent_logits.shape
+            latent_logits = torch.zeros_like(latent_logits)
+
         probs = torch.softmax(latent_logits, dim=1)
+        
+        # Check for NaN/Inf in probs (can happen even with valid logits if overflow)
+        if torch.isnan(probs).any() or torch.isinf(probs).any():
+            print(f"[WARNING] NaN/Inf in probabilities at step {self.t}")
+            # Use uniform distribution
+            b, k, h, w = probs.shape
+            probs = torch.ones_like(probs) / k
+        
         b, k, h, w = probs.shape
         probs_flat = probs.permute(0, 2, 3, 1).contiguous().view(-1, k)
+        
+        # Ensure probabilities sum to 1 (numerical stability)
+        probs_flat = probs_flat / probs_flat.sum(dim=1, keepdim=True).clamp(min=1e-8)
+        
         next_idx = torch.multinomial(probs_flat, 1).view(b, h, w)
+        
+        # Clamp indices to valid range [0, k-1] to prevent embedding errors
+        next_idx = torch.clamp(next_idx, 0, k - 1)
 
         self.indices = next_idx
         self.t += 1
@@ -721,6 +751,15 @@ class VQVAEAgent(nn.Module):
             actual_horizon = horizon
             
             for t in range(horizon):
+                # Validate indices before passing to policy
+                num_embeddings = self.vqvae.vq.num_embeddings
+                if (sim_env.indices < 0).any() or (sim_env.indices >= num_embeddings).any():
+                    print(f"[ERROR] Invalid indices at step {t}: range [{sim_env.indices.min()}, {sim_env.indices.max()}]")
+                    print(f"  Expected range: [0, {num_embeddings-1}]. Stopping rollout.")
+                    early_stop = True
+                    actual_horizon = t
+                    break
+                
                 logits, value = self.policy(sim_env.indices)
                 
                 # Check for NaN/Inf in logits - stop rollout early if detected
