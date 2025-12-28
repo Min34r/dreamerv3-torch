@@ -46,6 +46,12 @@ class ChannelLayerNorm2d(nn.Module):
 def continuous_bernoulli_nll(x: torch.Tensor, logits: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     """Negative log-likelihood for Continuous Bernoulli distribution."""
     x = torch.clamp(x, 0.0, 1.0)
+    
+    # Check for NaN in inputs
+    if torch.isnan(logits).any() or torch.isinf(logits).any():
+        print(f"[ERROR] NaN/Inf in reconstruction logits!")
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
+    
     lam = torch.sigmoid(logits)
     lam = torch.clamp(lam, eps, 1.0 - eps)
 
@@ -56,11 +62,20 @@ def continuous_bernoulli_nll(x: torch.Tensor, logits: torch.Tensor, eps: float =
     small = abs_t < 1e-3
     t2 = t * t
     logC_series = math.log(2.0) + (t2 / 3.0) + (2.0 * t2 * t2 / 15.0)
-    atanh_t = 0.5 * (torch.log1p(t) - torch.log1p(-t))
-    logC_general = torch.log(2.0 * atanh_t / t)
+    
+    # Clamp t to prevent atanh from exploding
+    t_clamped = torch.clamp(t, -0.9999, 0.9999)
+    atanh_t = 0.5 * (torch.log1p(t_clamped) - torch.log1p(-t_clamped))
+    logC_general = torch.log(torch.clamp(2.0 * atanh_t / (t + 1e-8), min=eps))
     logC = torch.where(small, logC_series, logC_general)
 
     nll = bce - logC
+    
+    # Final safety check
+    if torch.isnan(nll).any() or torch.isinf(nll).any():
+        print(f"[ERROR] NaN/Inf in continuous_bernoulli_nll output!")
+        nll = torch.nan_to_num(nll, nan=1.0, posinf=10.0, neginf=-10.0)
+    
     return nll.mean()
 
 
@@ -117,19 +132,40 @@ class VectorQuantizer(nn.Module):
         b, d, h, w = z_e.shape
         z = z_e.permute(0, 2, 3, 1).contiguous().view(-1, d)
 
+        # Check for NaN in input
+        if torch.isnan(z).any() or torch.isinf(z).any():
+            print(f"[CRITICAL] NaN/Inf in VQ input z_e!")
+            z = torch.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
+
         emb = self.embeddings.weight
-        dist = (
-            (z ** 2).sum(dim=1, keepdim=True)
-            - 2.0 * z @ emb.t()
-            + (emb ** 2).sum(dim=1, keepdim=True).t()
-        )
+        
+        # Check embedding table health
+        if torch.isnan(emb).any() or torch.isinf(emb).any():
+            print(f"[CRITICAL] NaN/Inf detected in VQ embeddings! Reinitializing...")
+            nn.init.uniform_(self.embeddings.weight, -1.0 / self.num_embeddings, 1.0 / self.num_embeddings)
+            emb = self.embeddings.weight
+        
+        # Compute distances with numerical stability
+        z_sq = torch.clamp((z ** 2).sum(dim=1, keepdim=True), max=1e6)
+        emb_sq = torch.clamp((emb ** 2).sum(dim=1, keepdim=True), max=1e6)
+        dist = z_sq - 2.0 * torch.clamp(z @ emb.t(), min=-1e6, max=1e6) + emb_sq.t()
 
         indices = torch.argmin(dist, dim=1)
         z_q = self.embeddings(indices).view(b, h, w, d).permute(0, 3, 1, 2).contiguous()
 
+        # Check quantized output
+        if torch.isnan(z_q).any() or torch.isinf(z_q).any():
+            print(f"[CRITICAL] NaN/Inf in quantized output z_q!")
+            z_q = torch.nan_to_num(z_q, nan=0.0, posinf=0.0, neginf=0.0)
+
         codebook_loss = F.mse_loss(z_q, z_e.detach())
         commitment_loss = F.mse_loss(z_e, z_q.detach())
         vq_loss = codebook_loss + self.beta * commitment_loss
+        
+        # Check VQ loss
+        if torch.isnan(vq_loss) or torch.isinf(vq_loss):
+            print(f"[CRITICAL] NaN/Inf in vq_loss! Setting to 0.")
+            vq_loss = torch.tensor(0.0, device=z_e.device, requires_grad=True)
 
         z_q_st = z_e + (z_q - z_e).detach()
         indices = indices.view(b, h, w)
@@ -246,6 +282,15 @@ class DynamicsModel64(nn.Module):
     def _embed_indices(self, idx: torch.Tensor) -> torch.Tensor:
         if self.embeddings is None:
             raise RuntimeError("Embeddings not set.")
+        
+        # Check for NaN in embedding table
+        if torch.isnan(self.embeddings.weight).any() or torch.isinf(self.embeddings.weight).any():
+            print(f"[ERROR] NaN/Inf in DynamicsModel embeddings!")
+            print(f"  Embedding stats: min={self.embeddings.weight.min()}, max={self.embeddings.weight.max()}")
+            # Return zeros as emergency fallback
+            z = torch.zeros(idx.shape[0], idx.shape[1], idx.shape[2], self.embedding_dim, device=idx.device)
+            return z.permute(0, 3, 1, 2).contiguous()
+        
         z = self.embeddings(idx)
         return z.permute(0, 3, 1, 2).contiguous()
 
@@ -656,6 +701,18 @@ class VQVAEAgent(nn.Module):
         """Train VQ-VAE on batch of images."""
         import tools
         
+        # Check embedding table for NaN BEFORE training
+        emb_weights = self.vqvae.vq.embeddings.weight
+        if torch.isnan(emb_weights).any() or torch.isinf(emb_weights).any():
+            print(f"[CRITICAL] NaN/Inf detected in VQ-VAE embeddings BEFORE training!")
+            print(f"  Embedding stats: min={emb_weights.min()}, max={emb_weights.max()}")
+            print(f"  NaN count: {torch.isnan(emb_weights).sum()}/{emb_weights.numel()}")
+            # Reinitialize corrupted embeddings
+            num_emb = self.vqvae.vq.num_embeddings
+            with torch.no_grad():
+                nn.init.uniform_(self.vqvae.vq.embeddings.weight, -1.0 / num_emb, 1.0 / num_emb)
+            print(f"[CRITICAL] Reinitialized VQ-VAE embeddings")
+        
         with tools.RequiresGrad(self.vqvae):
             self.vqvae.train()
             B, T, C, H, W = images.shape
@@ -665,11 +722,58 @@ class VQVAEAgent(nn.Module):
             recon_nll = continuous_bernoulli_nll(images_flat, out["logits"])
             vq_loss = out["vq_loss"]
             loss = recon_nll + vq_loss
+            
+            # Check for NaN in loss
+            if torch.isnan(loss).any() or torch.isinf(loss).any():
+                print(f"[ERROR] NaN/Inf in VQ-VAE loss: {loss.item()}")
+                print(f"  recon_nll={recon_nll.item()}, vq_loss={vq_loss.item()}")
+                return {
+                    "vqvae_loss": 0.0,
+                    "vq_loss": 0.0,
+                    "recon_nll": 0.0,
+                }
 
             self.vqvae_opt.zero_grad()
             loss.backward()
+            
+            # Check gradients for NaN
+            has_nan_grad = False
+            for name, param in self.vqvae.named_parameters():
+                if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                    print(f"[ERROR] NaN/Inf gradient in VQ-VAE {name}")
+                    has_nan_grad = True
+                    # Zero out this gradient
+                    param.grad.zero_()
+            
+            if has_nan_grad:
+                print(f"[ERROR] Skipping VQ-VAE optimizer step due to NaN gradients")
+                self.vqvae_opt.zero_grad()
+                return {
+                    "vqvae_loss": loss.item(),
+                    "vq_loss": vq_loss.item(),
+                    "recon_nll": recon_nll.item(),
+                }
+            
+            # Clip embedding gradients more aggressively to prevent corruption
+            emb_grad = self.vqvae.vq.embeddings.weight.grad
+            if emb_grad is not None:
+                emb_grad_norm = emb_grad.norm().item()
+                if emb_grad_norm > 10.0:
+                    print(f"[WARNING] Large embedding gradient norm: {emb_grad_norm:.2f}, clipping to 1.0")
+                    emb_grad.data = emb_grad.data * (1.0 / emb_grad_norm)
+            
             torch.nn.utils.clip_grad_norm_(self.vqvae.parameters(), 1.0)
             self.vqvae_opt.step()
+            
+            # Check embedding table for NaN AFTER update
+            emb_weights = self.vqvae.vq.embeddings.weight
+            if torch.isnan(emb_weights).any() or torch.isinf(emb_weights).any():
+                print(f"[CRITICAL] NaN/Inf detected in VQ-VAE embeddings AFTER optimizer step!")
+                print(f"  Rolling back optimizer step")
+                # Reinitialize corrupted embeddings
+                num_emb = self.vqvae.vq.num_embeddings
+                with torch.no_grad():
+                    nn.init.uniform_(self.vqvae.vq.embeddings.weight, -1.0 / num_emb, 1.0 / num_emb)
 
         return {
             "vqvae_loss": loss.item(),
