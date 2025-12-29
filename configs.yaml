@@ -530,3 +530,73 @@ intersection_vqvae:
     survival_reward: 0.02
     success_reward: 1.0
     shaped_reward_weight: 0.8
+
+merge_vqvae:
+  task: highway_merge
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 200
+  video_pred_log: false
+  size: [64, 64]
+  grayscale: False
+  world_model: 'vqvae'
+  vqvae_embedding_dim: 32
+  vqvae_num_embeddings: 128
+  vqvae_hidden_channels: 256
+  actor: {layers: 2, dist: 'onehot', std: 'none', lr: 1e-4, eps: 1e-5, grad_clip: 10.0}
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.35
+    reward_speed_range: [20, 28]
+    collision_reward: -1.0
+    safe_distance_reward: 0.15
+    min_safe_distance: 12.0
+    safe_distance_penalty: 0.4
+    lane_change_reward: -0.1
+    on_road_reward: 0.1
+    heading_reward: 0.1
+    progress_reward_scale: 0.015
+    survival_reward: 0.01
+    success_reward: 0.8
+    shaped_reward_weight: 0.8
+
+roundabout_vqvae:
+  task: highway_roundabout
+  steps: 1e5
+  action_repeat: 1
+  envs: 1
+  train_ratio: 64
+  eval_every: 5e3
+  log_every: 1e3
+  time_limit: 200
+  video_pred_log: false
+  size: [64, 64]
+  grayscale: False
+  world_model: 'vqvae'
+  vqvae_embedding_dim: 32
+  vqvae_num_embeddings: 128
+  vqvae_hidden_channels: 256
+  actor: {layers: 2, dist: 'onehot', std: 'none', lr: 1e-4, eps: 1e-5, grad_clip: 10.0}
+  highway_obs_type: 'image'
+  highway_action_type: 'discrete'
+  highway_reward_shaping: True
+  highway_reward_config:
+    high_speed_reward: 0.25
+    reward_speed_range: [8, 15]
+    collision_reward: -1.0
+    safe_distance_reward: 0.2
+    min_safe_distance: 8.0
+    safe_distance_penalty: 0.4
+    lane_change_reward: -0.03
+    on_road_reward: 0.15
+    heading_reward: 0.2
+    progress_reward_scale: 0.01
+    survival_reward: 0.02
+    success_reward: 1.0
+    shaped_reward_weight: 0.8
